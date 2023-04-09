@@ -5,6 +5,7 @@ layout(location = 0) out vec4 outColor;
 layout(location = 0) in vec3 FragPos;
 layout(location = 1) smooth in vec3 Normal;
 layout(location = 2) in vec4 Color;
+layout(location = 3) in float Light;
 
 struct DirLight {
     vec3 direction;
@@ -27,14 +28,14 @@ vec3 CalcDirLight(DirLight light, vec3 normal) {
 }
 
 void main() {
-    DirLight dirLight;
-    dirLight.direction = vec3(1., 1., 1.);
-    dirLight.ambient = vec3(0.1, 0.1, 0.1);
-    dirLight.diffuse = vec3(0.3, 0.3, 0.3);
-    if (Normal != vec3(0.0, 0.0, 0.0)) {
+    if (Light == 0. || Normal == vec3(0.0, 0.0, 0.0)) {
+        outColor = Color;
+    } else {
+        DirLight dirLight;
+        dirLight.direction = vec3(1., 1., 1.);
+        dirLight.ambient = vec3(0.1, 0.1, 0.1);
+        dirLight.diffuse = vec3(0.3, 0.3, 0.3);
         vec3 lights = CalcDirLight(dirLight, normalize(Normal));
         outColor = vec4(lights, 1.0) * Color;
-    } else {
-        outColor = Color;
     }
 }

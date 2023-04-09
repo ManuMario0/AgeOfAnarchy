@@ -1,5 +1,3 @@
-# ------------------------
-# - GLAD library setup 	-
-# ------------------------
+add_subdirectory("freetype")
 
-add_subdirectory("glad")
+    include_directories("freetype/include")
