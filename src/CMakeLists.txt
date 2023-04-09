@@ -9,4 +9,7 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES VERSION ${CMAKE_PROJECT_V
 # - subdirectories                  -
 # -----------------------------------
 
+add_subdirectory("memory")
+add_subdirectory("common")
 add_subdirectory("renderer")
+add_subdirectory("core")

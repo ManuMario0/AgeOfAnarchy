@@ -14,7 +14,7 @@
 typedef struct {
     ModelBuffer *   buffer;
     uint32_t        indexCount;
-    vec3            color;
+    vec4            color;
 } Model;
 
 Model *createModel(Window *window, size_t vertexSize, void *vertices, size_t indexSize, void *indices);

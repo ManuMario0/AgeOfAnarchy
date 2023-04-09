@@ -8,9 +8,10 @@
 #include <string.h>
 
 #include "model.h"
+#include "MEM_alloc.h"
 
 Model *createModel(Window *window, size_t vertexSize, void *vertices, size_t indexSize, void *indices) {
-    Model *model = malloc(sizeof(Model));
+    Model *model = MEM_malloc(sizeof(Model), __func__);
     model->buffer = createModelBuffer(window, vertexSize, vertices, indexSize, indices);
     model->indexCount = (uint32_t) (indexSize / sizeof(uint16_t));
     return model;
@@ -18,7 +19,7 @@ Model *createModel(Window *window, size_t vertexSize, void *vertices, size_t ind
 
 void destroyModel(Window *window, Model *model) {
     destroyModelBuffer(window, model->buffer);
-    free(model);
+    MEM_free(model);
 }
 
 void setModelColor(Model *model, vec4 color) {

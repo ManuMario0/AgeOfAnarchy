@@ -7,6 +7,7 @@
 
 #include "init.h"
 #include "headers/common.h"
+#include "MEM_alloc.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -29,11 +30,11 @@ static uint32_t *get_source_code(const char *file, size_t *size);
 //-----------------------------------------------//
 
 Window *createWindow(void) {
-    Window *window = malloc(sizeof(Window));
+    Window *window = MEM_malloc_aligned(sizeof(Window), 16, __func__);
     
     if(!glfwInit()) {
         print_error("unable to initialise glfw");
-        free(window);
+        MEM_free(window);
         return NULL;
     }
     
@@ -45,7 +46,7 @@ Window *createWindow(void) {
     const GLFWvidmode* mode = glfwGetVideoMode(monitor);
     window->glfwWindow = glfwCreateWindow(mode->width, mode->height, "Age of Anarchy", NULL, NULL);
     if (window->glfwWindow == NULL) {
-        free(window);
+        MEM_free(window);
         return NULL;
     }
     
@@ -81,17 +82,17 @@ Window *createWindow(void) {
     // instance creation
     if (vkCreateInstance(&instanceInfo, NULL, &window->instance) != VK_SUCCESS) {
         print_error("fail to create instance");
-        free(window);
-        free((void*)instanceInfo.ppEnabledExtensionNames);
+        MEM_free(window);
+        MEM_free((void*)instanceInfo.ppEnabledExtensionNames);
         return NULL;
     }
     
-    free((void*)instanceInfo.ppEnabledExtensionNames);
+    MEM_free((void*)instanceInfo.ppEnabledExtensionNames);
     
     // surface creation
     if (glfwCreateWindowSurface(window->instance, window->glfwWindow, NULL, &window->surface)) {
         print_error("unable to bind vulkan to the window");
-        free(window);
+        MEM_free(window);
         return NULL;
     }
     
@@ -106,32 +107,32 @@ int destroyWindow(Window *window) {
     vkDeviceWaitIdle(window->device);
     
     if (window->imageAvailableSemaphores) {
-        for (int i=0; i<MAX_FRAME_IN_FLIGHT; i++) {
+        for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(window->device, window->imageAvailableSemaphores[i], NULL);
         }
-        free(window->imageAvailableSemaphores);
+        MEM_free(window->imageAvailableSemaphores);
     }
     
     if (window->renderFinishedSemaphores) {
-        for (int i=0; i<MAX_FRAME_IN_FLIGHT; i++) {
+        for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroySemaphore(window->device, window->renderFinishedSemaphores[i], NULL);
         }
-        free(window->renderFinishedSemaphores);
+        MEM_free(window->renderFinishedSemaphores);
     }
     
     if (window->inFlightFences) {
-        for (int i=0; i<MAX_FRAME_IN_FLIGHT; i++) {
+        for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
             vkDestroyFence(window->device, window->inFlightFences[i], NULL);
         }
-        free(window->inFlightFences);
+        MEM_free(window->inFlightFences);
     }
     
-    if (window->pipeline) {
-        vkDestroyPipeline(window->device, window->pipeline, NULL);
+    if (window->colorPipeline) {
+        vkDestroyPipeline(window->device, window->colorPipeline, NULL);
     }
     
-    if (window->layout) {
-        vkDestroyPipelineLayout(window->device, window->layout, NULL);
+    if (window->colorPipelineLayout) {
+        vkDestroyPipelineLayout(window->device, window->colorPipelineLayout, NULL);
     }
     
     if (window->renderPass) {
@@ -142,18 +143,18 @@ int destroyWindow(Window *window) {
         for (int i=0; i<window->imageCount; i++) {
             vkDestroyFramebuffer(window->device, window->framebuffers[i], NULL);
         }
-        free(window->framebuffers);
+        MEM_free(window->framebuffers);
     }
     
     if (window->imageViews) {
         for (int i=0; i<window->imageCount; i++) {
             vkDestroyImageView(window->device, window->imageViews[i], NULL);
         }
-        free(window->imageViews);
+        MEM_free(window->imageViews);
     }
     
     if (window->images) {
-        free(window->images);
+        MEM_free(window->images);
     }
     
     if (window->depthImageView) {
@@ -174,6 +175,8 @@ int destroyWindow(Window *window) {
     
     if (window->device) {
         vkDestroyDevice(window->device, NULL);
+        MEM_free(window->graphicQueueFamily.queues);
+        MEM_free(window->transferQueueFamily.queues);
     }
     
     if (window->surface) {
@@ -188,7 +191,7 @@ int destroyWindow(Window *window) {
         glfwDestroyWindow(window->glfwWindow);
     }
     
-    free(window);
+    MEM_free(window);
     return AOA_TRUE;
 }
 
@@ -203,10 +206,10 @@ int selectPhysicalDevice(Window *window) {
         return AOA_FALSE;
     }
     
-    VkPhysicalDevice *physicalDevices = malloc(count*sizeof(VkPhysicalDevice));
+    VkPhysicalDevice *physicalDevices = MEM_malloc(count*sizeof(VkPhysicalDevice), __func__);
     if (vkEnumeratePhysicalDevices(window->instance, &count, physicalDevices) != VK_SUCCESS) {
         print_error("unable to enumerate present physical devices");
-        free(physicalDevices);
+        MEM_free(physicalDevices);
         return AOA_FALSE;
     }
     
@@ -220,12 +223,13 @@ int selectPhysicalDevice(Window *window) {
     
     if (chosenPhysicalDevice == VK_NULL_HANDLE) {
         print_error("unabled to find a suitable device");
-        free(physicalDevices);
+        MEM_free(physicalDevices);
         return AOA_FALSE;
     }
     
     window->physicalDevice = chosenPhysicalDevice;
     
+    MEM_free(physicalDevices);
     return AOA_TRUE;
 }
 
@@ -237,7 +241,7 @@ int createLogicalDevice(Window *window) {
         return AOA_FALSE;
     }
     
-    VkQueueFamilyProperties *queueFamilyProperties = malloc(count*sizeof(VkQueueFamilyProperties));
+    VkQueueFamilyProperties *queueFamilyProperties = MEM_malloc(count*sizeof(VkQueueFamilyProperties), __func__);
     vkGetPhysicalDeviceQueueFamilyProperties(window->physicalDevice, &count, queueFamilyProperties);
     uint32_t selectedQueueFamily[2] = {count, count}; // first family for graphics, second for transfer
     for (int i=0; i<count; i++) {
@@ -256,7 +260,7 @@ int createLogicalDevice(Window *window) {
     
     if (selectedQueueFamily[0] == count || selectedQueueFamily[1] == count) {
         print_warning("unabled to find a suitable queue on this device");
-        free(queueFamilyProperties);
+        MEM_free(queueFamilyProperties);
         return AOA_FALSE;
     }
     
@@ -265,7 +269,7 @@ int createLogicalDevice(Window *window) {
     queueInfo[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueInfo[0].queueFamilyIndex = selectedQueueFamily[0];
     queueInfo[0].queueCount = queueFamilyProperties[selectedQueueFamily[0]].queueCount;
-    float *priorGraphics = malloc(queueInfo[0].queueCount*sizeof(float));
+    float *priorGraphics = MEM_malloc(queueInfo[0].queueCount*sizeof(float), __func__);
     for (int i=0; i<queueInfo[0].queueCount; i++) {
         priorGraphics[i] = 1.F;
     }
@@ -275,14 +279,14 @@ int createLogicalDevice(Window *window) {
     queueInfo[1].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
     queueInfo[1].queueFamilyIndex = selectedQueueFamily[1];
     queueInfo[1].queueCount = queueFamilyProperties[selectedQueueFamily[1]].queueCount;
-    float *priorTransfer = malloc(queueInfo[1].queueCount*sizeof(float));
+    float *priorTransfer = MEM_malloc(queueInfo[1].queueCount*sizeof(float), __func__);
     for (int i=0; i<queueInfo[1].queueCount; i++) {
         priorTransfer[i] = 1.F;
     }
     queueInfo[1].pQueuePriorities = priorTransfer;
     window->transferQueueFamily.queueCount = queueInfo[1].queueCount;
     
-    free(queueFamilyProperties);
+    MEM_free(queueFamilyProperties);
     
     VkDeviceCreateInfo deviceInfo;
     memset(&deviceInfo, 0, sizeof(VkDeviceCreateInfo));
@@ -291,33 +295,33 @@ int createLogicalDevice(Window *window) {
     deviceInfo.pQueueCreateInfos = queueInfo;
 #ifdef __APPLE__
     deviceInfo.enabledExtensionCount = 2;
-    const char **extensionName = calloc(2, sizeof(char *));
+    const char **extensionName = MEM_calloc_array(2, sizeof(char *), __func__);
     extensionName[0] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
     extensionName[1] = "VK_KHR_portability_subset";
 #else
     deviceInfo.enabledExtensionCount = 1;
-    const char **extensionName = calloc(1, sizeof(char *));
+    const char **extensionName = MEM_calloc_array(1, sizeof(char *), __func__);
     extensionName[0] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
 #endif
     deviceInfo.ppEnabledExtensionNames = extensionName;
     if (vkCreateDevice(window->physicalDevice, &deviceInfo, NULL, &window->device) != VK_SUCCESS) {
         print_warning("unabled to create the logical device");
-        free(extensionName);
-        free(priorGraphics);
-        free(priorTransfer);
+        MEM_free(extensionName);
+        MEM_free(priorGraphics);
+        MEM_free(priorTransfer);
         return AOA_FALSE;
     }
-    free(extensionName);
-    free(priorGraphics);
-    free(priorTransfer);
+    MEM_free(extensionName);
+    MEM_free(priorGraphics);
+    MEM_free(priorTransfer);
     
-    window->graphicQueueFamily.queues = calloc(window->graphicQueueFamily.queueCount, sizeof(VkQueue));
+    window->graphicQueueFamily.queues = MEM_malloc_aligned(window->graphicQueueFamily.queueCount*sizeof(VkQueue), 32, __func__);
     for (int i=0; i<window->graphicQueueFamily.queueCount; i++) {
         vkGetDeviceQueue(window->device, selectedQueueFamily[0], i, &window->graphicQueueFamily.queues[i]);
     }
     window->graphicQueueFamily.family = selectedQueueFamily[0];
     
-    window->transferQueueFamily.queues = calloc(window->transferQueueFamily.queueCount, sizeof(VkQueue));
+    window->transferQueueFamily.queues = MEM_malloc_aligned(window->transferQueueFamily.queueCount*sizeof(VkQueue), 32, __func__);
     for (int i=0; i<window->transferQueueFamily.queueCount; i++) {
         vkGetDeviceQueue(window->device, selectedQueueFamily[1], i, &window->transferQueueFamily.queues[i]);
     }
@@ -333,10 +337,10 @@ int setupSwapchain(Window *window) {
         return AOA_FALSE;
     }
     
-    VkSurfaceFormatKHR *availableFormats = calloc(surfaceFormatCount, sizeof(VkSurfaceFormatKHR));
+    VkSurfaceFormatKHR *availableFormats = MEM_calloc_array(surfaceFormatCount, sizeof(VkSurfaceFormatKHR), __func__);
     if (vkGetPhysicalDeviceSurfaceFormatsKHR(window->physicalDevice, window->surface, &surfaceFormatCount, availableFormats) != VK_SUCCESS) {
         print_error("unabled to retrieve available surface format");
-        free(availableFormats);
+        MEM_free(availableFormats);
         return AOA_FALSE;
     }
     
@@ -347,7 +351,7 @@ int setupSwapchain(Window *window) {
             break;
         }
     }
-    free(availableFormats);
+    MEM_free(availableFormats);
     window->imageFormat = surfaceFormat.format;
     
     
@@ -363,9 +367,10 @@ int setupSwapchain(Window *window) {
         return AOA_FALSE;
     }
     
-    VkPresentModeKHR *availablePresentModes = calloc(presentCount, sizeof(VkPresentModeKHR));
+    VkPresentModeKHR *availablePresentModes = MEM_calloc_array(presentCount, sizeof(VkPresentModeKHR), __func__);
     if (vkGetPhysicalDeviceSurfacePresentModesKHR(window->physicalDevice, window->surface, &presentCount, availablePresentModes) != VK_SUCCESS) {
         print_error("unabled to retrieve available surface format");
+        MEM_free(availablePresentModes);
         return AOA_FALSE;
     }
     
@@ -376,6 +381,7 @@ int setupSwapchain(Window *window) {
             break;
         }
     }
+    MEM_free(availablePresentModes);
     
     VkSwapchainCreateInfoKHR swapchainInfo;
     memset(&swapchainInfo, 0, sizeof(VkSwapchainCreateInfoKHR));
@@ -400,10 +406,10 @@ int setupSwapchain(Window *window) {
         print_error("unabled to get swapchain images");
         return AOA_FALSE;
     }
-    window->images = calloc(window->imageCount, sizeof(VkImage));
+    window->images = MEM_calloc_array(window->imageCount, sizeof(VkImage), __func__);
     if (vkGetSwapchainImagesKHR(window->device, window->swapchain, &window->imageCount, window->images) != VK_SUCCESS) {
         print_error("unabled to get swapchain images");
-        free(window->images);
+        MEM_free(window->images);
         return AOA_FALSE;
     }
     
@@ -413,7 +419,7 @@ int setupSwapchain(Window *window) {
 }
 
 int createImageViews(Window *window) {
-    window->imageViews = calloc(window->imageCount, sizeof(VkImageView));
+    window->imageViews = MEM_malloc_aligned(window->imageCount*sizeof(VkImageView), 32, __func__);
     
     for (int i=0; i<window->imageCount; i++) {
         VkImageViewCreateInfo imageViewInfo;
@@ -433,7 +439,7 @@ int createImageViews(Window *window) {
         imageViewInfo.subresourceRange.layerCount = 1;
         if (vkCreateImageView(window->device, &imageViewInfo, NULL, &window->imageViews[i]) != VK_SUCCESS) {
             print_error("unabled to create image views");
-            free(window->imageViews);
+            MEM_free(window->imageViews);
             return AOA_FALSE;
         }
     }
@@ -456,8 +462,8 @@ VkFormat findSupportedFormat(Window *window, VkFormat *candidats, int candidatsC
 
 int createDepthResources(Window *window) {
     VkFormat format = findSupportedFormat(window,
-                                          (VkFormat[3]){VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
-                                          3,
+                                          (VkFormat[2]){VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
+                                          2,
                                           VK_IMAGE_TILING_OPTIMAL,
                                           VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
     
@@ -525,7 +531,7 @@ int createDepthResources(Window *window) {
     imageViewInfo.subresourceRange.layerCount = 1;
     if (vkCreateImageView(window->device, &imageViewInfo, NULL, &window->depthImageView) != VK_SUCCESS) {
         print_error("unabled to create image views");
-        free(window->imageViews);
+        MEM_free(window->imageViews);
         return AOA_FALSE;
     }
     
@@ -552,7 +558,7 @@ int createRenderpass(Window *window) {
     depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -612,10 +618,10 @@ int setupPipeline(Window *window) {
     VkShaderModule vertShaderModule;
     if (vkCreateShaderModule(window->device, &vertShaderModuleInfo, NULL, &vertShaderModule) != VK_SUCCESS) {
         print_error("unabled to create a shader module");
-        free((void*)vertShaderModuleInfo.pCode);
+        MEM_free((void*)vertShaderModuleInfo.pCode);
         return AOA_FALSE;
     }
-    free((void*)vertShaderModuleInfo.pCode);
+    MEM_free((void*)vertShaderModuleInfo.pCode);
     
     VkPipelineShaderStageCreateInfo vertShaderInfo;
     memset(&vertShaderInfo, 0, sizeof(VkPipelineShaderStageCreateInfo));
@@ -632,10 +638,10 @@ int setupPipeline(Window *window) {
     if (vkCreateShaderModule(window->device, &fragShaderModuleInfo, NULL, &fragShaderModule) != VK_SUCCESS) {
         print_error("unabled to create a shader module");
         vkDestroyShaderModule(window->device, vertShaderModule, NULL);
-        free((void*)fragShaderModuleInfo.pCode);
+        MEM_free((void*)fragShaderModuleInfo.pCode);
         return AOA_FALSE;
     }
-    free((void*)fragShaderModuleInfo.pCode);
+    MEM_free((void*)fragShaderModuleInfo.pCode);
     
     VkPipelineShaderStageCreateInfo fragShaderInfo;
     memset(&fragShaderInfo, 0, sizeof(VkPipelineShaderStageCreateInfo));
@@ -723,12 +729,12 @@ int setupPipeline(Window *window) {
     VkPipelineDynamicStateCreateInfo dynamicStateInfo;
     memset(&dynamicStateInfo, 0, sizeof(VkPipelineDynamicStateCreateInfo));
     dynamicStateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamicStateInfo.dynamicStateCount = 2;
-    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT};
+    dynamicStateInfo.dynamicStateCount = 4;
+    VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_STENCIL_REFERENCE, VK_DYNAMIC_STATE_STENCIL_WRITE_MASK};
     dynamicStateInfo.pDynamicStates = dynamicStates;
     
     VkPushConstantRange constantRange;
-    constantRange.size = 20*sizeof(float);
+    constantRange.size = 21*sizeof(float);
     constantRange.offset = 0;
     constantRange.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
     
@@ -743,7 +749,7 @@ int setupPipeline(Window *window) {
         print_error("unabled to create the pipeline layout");
         return AOA_FALSE;
     }
-    window->layout = layout;
+    window->colorPipelineLayout = layout;
     
     VkPipelineDepthStencilStateCreateInfo depthStencil;
     memset(&depthStencil, 0, sizeof(VkPipelineDepthStencilStateCreateInfo));
@@ -751,8 +757,20 @@ int setupPipeline(Window *window) {
     depthStencil.depthTestEnable = VK_TRUE;
     depthStencil.depthWriteEnable = VK_TRUE;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
-    depthStencil.stencilTestEnable = VK_FALSE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.stencilTestEnable = VK_TRUE;
+    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    
+    VkStencilOpState stencilState;
+    memset(&stencilState, 0, sizeof(VkStencilOpState));
+    stencilState.failOp = VK_STENCIL_OP_KEEP;
+    stencilState.passOp = VK_STENCIL_OP_INCREMENT_AND_CLAMP;
+    stencilState.depthFailOp = VK_STENCIL_OP_KEEP;
+    stencilState.compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL;
+    stencilState.compareMask = 1;
+    stencilState.writeMask = 1;
+    stencilState.reference = 1;
+    
+    depthStencil.front = stencilState;
     
     VkGraphicsPipelineCreateInfo pipelineInfo;
     memset(&pipelineInfo, 0, sizeof(VkGraphicsPipelineCreateInfo));
@@ -771,7 +789,7 @@ int setupPipeline(Window *window) {
     pipelineInfo.renderPass =           window->renderPass;
     pipelineInfo.basePipelineHandle =   VK_NULL_HANDLE;
     
-    if (vkCreateGraphicsPipelines(window->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &window->pipeline) != VK_SUCCESS) {
+    if (vkCreateGraphicsPipelines(window->device, VK_NULL_HANDLE, 1, &pipelineInfo, NULL, &window->colorPipeline) != VK_SUCCESS) {
         print_error("unabled to create the graphic pipeline");
         vkDestroyShaderModule(window->device, vertShaderModule, NULL);
         vkDestroyShaderModule(window->device, fragShaderModule, NULL);
@@ -785,7 +803,7 @@ int setupPipeline(Window *window) {
 }
 
 int createFramebuffers(Window *window) {
-    window->framebuffers = calloc(window->imageCount, sizeof(VkFramebuffer));
+    window->framebuffers = MEM_calloc_array(window->imageCount, sizeof(VkFramebuffer), __func__);
     
     for (int i=0; i<window->imageCount; i++) {
         VkImageView attachments[] = {window->imageViews[i], window->depthImageView};
@@ -801,7 +819,7 @@ int createFramebuffers(Window *window) {
         framebufferInfo.layers = 1;
         if (vkCreateFramebuffer(window->device, &framebufferInfo, NULL, &window->framebuffers[i]) != VK_SUCCESS) {
             print_error("unabled to create the framebuffer");
-            free(window->framebuffers);
+            MEM_free(window->framebuffers);
             return AOA_FALSE;
         }
     }
@@ -810,9 +828,9 @@ int createFramebuffers(Window *window) {
 }
 
 int createSync(Window *window) {
-    window->imageAvailableSemaphores = calloc(MAX_FRAME_IN_FLIGHT, sizeof(VkSemaphore));
-    window->renderFinishedSemaphores = calloc(MAX_FRAME_IN_FLIGHT, sizeof(VkSemaphore));
-    window->inFlightFences = calloc(MAX_FRAME_IN_FLIGHT, sizeof(VkFence));
+    window->imageAvailableSemaphores = MEM_calloc_array(MAX_FRAMES_IN_FLIGHT, sizeof(VkSemaphore), __func__);
+    window->renderFinishedSemaphores = MEM_calloc_array(MAX_FRAMES_IN_FLIGHT, sizeof(VkSemaphore), __func__);
+    window->inFlightFences = MEM_calloc_array(MAX_FRAMES_IN_FLIGHT, sizeof(VkFence), __func__);
     
     VkSemaphoreCreateInfo semaphoreInfo;
     memset(&semaphoreInfo, 0, sizeof(VkSemaphoreCreateInfo));
@@ -823,14 +841,14 @@ int createSync(Window *window) {
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     
-    for (int i=0; i<MAX_FRAME_IN_FLIGHT; i++) {
+    for (int i=0; i<MAX_FRAMES_IN_FLIGHT; i++) {
         if (vkCreateSemaphore(window->device, &semaphoreInfo, NULL, &window->imageAvailableSemaphores[i]) != VK_SUCCESS |
             vkCreateSemaphore(window->device, &semaphoreInfo, NULL, &window->renderFinishedSemaphores[i]) != VK_SUCCESS |
             vkCreateFence(window->device, &fenceInfo, NULL, &window->inFlightFences[i]) != VK_SUCCESS) {
             print_error("unabled to create sync objects");
-            free(window->imageAvailableSemaphores);
-            free(window->renderFinishedSemaphores);
-            free(window->inFlightFences);
+            MEM_free(window->imageAvailableSemaphores);
+            MEM_free(window->renderFinishedSemaphores);
+            MEM_free(window->inFlightFences);
             return AOA_FALSE;
         }
     }
@@ -863,21 +881,21 @@ int check_layer_support(const char *layer) {
         return 0;
     }
     
-    VkLayerProperties *layerProperties = calloc(count, sizeof(VkLayerProperties));
+    VkLayerProperties *layerProperties = MEM_calloc_array(count, sizeof(VkLayerProperties), __func__);
     if (vkEnumerateInstanceLayerProperties(&count, layerProperties) != VK_SUCCESS) {
         print_error("unabled to get supported layers");
-        free(layerProperties);
+        MEM_free(layerProperties);
         return 0;
     }
     
     for (int i=0; i<count; i++) {
         if (!strncmp(layer, layerProperties[i].layerName, VK_MAX_EXTENSION_NAME_SIZE)) {
-            free(layerProperties);
+            MEM_free(layerProperties);
             return 1;
         }
     }
     
-    free(layerProperties);
+    MEM_free(layerProperties);
     return 0;
 }
 
@@ -885,7 +903,7 @@ const char **get_required_extensions(uint32_t *cc) {
     uint32_t count = 0;
     const char **glfwRequiredExtensions = glfwGetRequiredInstanceExtensions(&count);
     
-    const char **requiredExtensions = calloc(count+2, sizeof(char *));
+    const char **requiredExtensions = MEM_calloc_array(count+2, sizeof(char *), __func__);
     memcpy(requiredExtensions, glfwRequiredExtensions, count*sizeof(char*));
     
 #ifdef DEBUG
@@ -918,10 +936,10 @@ int is_device_suitable(Window *window, VkPhysicalDevice device) {
         return AOA_FALSE;
     }
     
-    VkExtensionProperties *supportedExtensions = calloc(supportedExtensionsCount, sizeof(VkExtensionProperties));
+    VkExtensionProperties *supportedExtensions = MEM_calloc_array(supportedExtensionsCount, sizeof(VkExtensionProperties), __func__);
     if (vkEnumerateDeviceExtensionProperties(device, NULL, &supportedExtensionsCount, supportedExtensions) != VK_SUCCESS) {
         print_warning("unable to find physical device property");
-        free(supportedExtensions);
+        MEM_free(supportedExtensions);
         return AOA_FALSE;
     }
     
@@ -937,14 +955,14 @@ int is_device_suitable(Window *window, VkPhysicalDevice device) {
             }
         }
         if (!extensionsSupported) {
-            free(supportedExtensions);
-            free(requiredExtensions);
+            MEM_free(supportedExtensions);
+            MEM_free(requiredExtensions);
             return AOA_FALSE;
         }
     }
     
-    free(requiredExtensions);
-    free(supportedExtensions);
+    MEM_free(requiredExtensions);
+    MEM_free(supportedExtensions);
     return AOA_TRUE;
 }
 
@@ -954,7 +972,7 @@ uint32_t *get_source_code(const char *file, size_t *size) {
     *size = ftell(f);
     fseek(f, 0, SEEK_SET);
     
-    uint32_t *content = calloc(*size, sizeof(char));
+    uint32_t *content = MEM_calloc_array(*size, sizeof(char), __func__);
     fread(content, 1, *size, f);
     
     fclose(f);

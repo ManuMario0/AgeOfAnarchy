@@ -11,13 +11,15 @@
 #include "init.h"
 #include "buffer.h"
 #include "vulkan/vulkan.h"
+#include "device_alloc.h"
 
 
 typedef struct {
     Buffer          vertexBuffer;
-    BufferMemory    *vertexBufferMemory;
     Buffer          indexBuffer;
-    BufferMemory    *indexBufferMemory;
+    
+    MemBlock *      vertMemory;
+    MemBlock *      indexMemory;
 } ModelBuffer;
 
 ModelBuffer *createModelBuffer(Window *window, size_t vertexSize, void *vertices, size_t indexSize, void *indices);

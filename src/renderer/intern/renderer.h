@@ -17,6 +17,7 @@
 #include "object.h"
 #include "camera.h"
 #include "ui.h"
+#include "device_alloc.h"
 
 typedef struct {
     Window *    window;
@@ -37,5 +38,6 @@ typedef struct {
 } Renderer;
 
 int recordCommandBuffer(Renderer *renderer, uint32_t index);
+int drawFrame(Renderer *renderer);
 
 #endif /* renderer_h */

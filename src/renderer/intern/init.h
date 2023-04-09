@@ -12,7 +12,7 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
-#define MAX_FRAME_IN_FLIGHT 2
+#define MAX_FRAMES_IN_FLIGHT 2
 
 typedef struct {
     uint32_t    family;
@@ -47,8 +47,14 @@ typedef struct {
     VkFormat            imageFormat;
     VkRenderPass        renderPass;
     
-    VkPipeline          pipeline;
-    VkPipelineLayout    layout;
+    VkPipeline          colorPipeline;
+    VkPipelineLayout    colorPipelineLayout;
+    
+    VkPipeline          texturePipeline;
+    VkPipelineLayout    texturePipelineLayout;
+    VkSampler           sampler;
+    VkDescriptorPool    descriptorPool;
+    VkDescriptorSetLayout   texDescriptorSetLayout;
     
     VkFramebuffer *     framebuffers;
     

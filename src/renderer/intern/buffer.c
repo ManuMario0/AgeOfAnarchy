@@ -8,6 +8,7 @@
 #include "buffer.h"
 #include "command_buffer.h"
 #include "headers/common.h"
+#include "MEM_alloc.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,9 +24,9 @@ static void print_warning(char str[]);
 //-----------------------------------------------//
 //-     Implementation                          -//
 //-----------------------------------------------//
-
+/*
 BufferMemory *allocateDeviceMemory(Window *window, size_t size, uint32_t typeFilter, VkMemoryPropertyFlags properties) {
-    BufferMemory *mem = malloc(sizeof(BufferMemory));
+    BufferMemory *mem = MEM_malloc(sizeof(BufferMemory), __func__);
     
     VkMemoryAllocateInfo allocInfo;
     memset(&allocInfo, 0, sizeof(VkMemoryAllocateInfo));
@@ -35,7 +36,7 @@ BufferMemory *allocateDeviceMemory(Window *window, size_t size, uint32_t typeFil
     VkPhysicalDeviceMemoryProperties memProperties;
     vkGetPhysicalDeviceMemoryProperties(window->physicalDevice, &memProperties);
     for (int i=0; i<memProperties.memoryTypeCount; i++) {
-        if (typeFilter & (i << 1) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+        if (typeFilter & (1 << i) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
             allocInfo.memoryTypeIndex = i;
             break;
         }
@@ -43,10 +44,10 @@ BufferMemory *allocateDeviceMemory(Window *window, size_t size, uint32_t typeFil
     
     mem->size = size;
     mem->offset = 0;
-
+    
     if (vkAllocateMemory(window->device, &allocInfo, NULL, &mem->memory) != VK_SUCCESS) {
         print_error("unabled to allocate buffer memory");
-        free(mem);
+        MEM_free(mem);
         return NULL;
     }
     
@@ -55,9 +56,9 @@ BufferMemory *allocateDeviceMemory(Window *window, size_t size, uint32_t typeFil
 
 int freeDeviceMemory(Window *window, BufferMemory *mem) {
     vkFreeMemory(window->device, mem->memory, NULL);
-    free(mem);
+    MEM_free(mem);
     return AOA_TRUE;
-}
+}*/
 
 int createBuffer(Window *window, size_t size, VkBufferUsageFlags usage, Buffer *buffer) {
     VkBufferCreateInfo bufferInfo;
@@ -85,22 +86,8 @@ int destroyBuffer(Window *window, Buffer buffer) {
     return AOA_TRUE;
 }
 
-int bindBuffer(Window *window, Buffer buffer, BufferMemory *mem) {
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(window->device, buffer.buffer, &memRequirements);
-    
-    if (mem->size - mem->offset < memRequirements.size) {
-        print_error("unabled to bind the buffer : ran out of memory");
-        return AOA_FALSE;
-    }
-    /*
-    if ((mem->properties | memRequirements.memoryTypeBits) != mem->properties) {
-        print_error("not the right type of memory for this buffer");
-        return AOA_FALSE;
-    }*/
-    
-    vkBindBufferMemory(window->device, buffer.buffer, mem->memory, mem->offset);
-    mem->offset += memRequirements.size;
+int bindBuffer(Window *window, Buffer buffer, MemBlock *b) {
+    vkBindBufferMemory(window->device, buffer.buffer, getBindingPoint(b), getOffset(b));
     
     return AOA_TRUE;
 }

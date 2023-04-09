@@ -9,9 +9,10 @@
 #include <string.h>
 
 #include "object.h"
+#include "MEM_alloc.h"
 
 Object *createObject(int model, vec3 pos, vec3 orientation) {
-    Object *obj = malloc(sizeof(Object));
+    Object *obj = MEM_malloc_aligned(sizeof(Object), 16, __func__);
     obj->model = model;
     memcpy(obj->pos, pos, sizeof(vec3));
     memcpy(obj->orientation, orientation, sizeof(vec3));
@@ -19,7 +20,7 @@ Object *createObject(int model, vec3 pos, vec3 orientation) {
 }
 
 void destroyObject(Object *obj) {
-    free(obj);
+    MEM_free(obj);
 }
 
 float *getObjectPos(Object *obj) {
@@ -45,4 +46,8 @@ void getObjectMatrix(Object *obj, mat4 dest) {
     glm_rotate(_dest, obj->orientation[2], (vec3){0.f, 0.f, 1.f});
     glm_translate(_dest, obj->pos);
     memcpy(dest, _dest, sizeof(mat4));
+}
+
+void outlineObject(Object *obj, uint8_t b) {
+    obj->outline = b;
 }

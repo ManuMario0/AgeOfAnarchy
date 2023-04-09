@@ -6,6 +6,7 @@
 //
 
 #include "wavefront.h"
+#include "MEM_alloc.h"
 
 #include <stdlib.h>
 
@@ -18,7 +19,7 @@ void file_reader(void* ctx, const char* filename, const int is_mtl, const char* 
     *len = ftell(f);
     fseek(f, 0, SEEK_SET);
     
-    char *buff = calloc(*len, sizeof(char));
+    char *buff = MEM_calloc_array(*len, sizeof(char), __func__);
     
     fread(buff, sizeof(char), *len, f);
     
@@ -39,13 +40,13 @@ void acquireData(float **data, uint16_t **indicies, int *dataSize, int *indexCou
     void *ctx;
     
     tinyobj_parse_obj(&attrib, &shapes, &num_shapes, &materials, &num_materials, filename, file_reader, (void*)&ctx, 0);
-    free(ctx);
+    MEM_free(ctx);
     
     /* THEIR WILL BE MEMORY LEAKS FOR NOW */
     // TODO: rewrite all the code my self, will be more efficient for my purposes
     
-    float       *pdata = calloc(attrib.num_faces, 6*sizeof(float)); // we will always use triangular faces in the storage files
-    uint16_t    *pindicies = calloc(attrib.num_faces, sizeof(uint16_t));
+    float       *pdata = MEM_calloc_array(attrib.num_faces, 6*sizeof(float), __func__); // we will always use triangular faces in the storage files
+    uint16_t    *pindicies = MEM_calloc_array(attrib.num_faces, sizeof(uint16_t), __func__);
     for (int i=0; i<attrib.num_face_num_verts; i++) {
         assert(attrib.face_num_verts[i] == 3);
         for (int j=0; j<3; j++) {

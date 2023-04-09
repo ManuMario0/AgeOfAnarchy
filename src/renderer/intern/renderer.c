@@ -8,6 +8,8 @@
 #include "renderer.h"
 #include "headers/common.h"
 #include "wavefront.h"
+#include "texture.h"
+#include "MEM_alloc.h"
 
 #define CGLM_FORCE_LEFT_HANDED
 #define CGLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -28,12 +30,12 @@ static void print_warning(char str[]);
 //-----------------------------------------------//
 
 Renderer *createRenderer(void) {
-    Renderer *renderer = malloc(sizeof(Renderer));
+    Renderer *renderer = MEM_malloc_aligned(sizeof(Renderer), 32, __func__);
     memset(renderer, 0, sizeof(Renderer));
     renderer->window = createWindow();
     if (!renderer->window) {
         print_error("unabled to create the renderer");
-        free(renderer);
+        MEM_free(renderer);
         return NULL;
     }
     glfwSetWindowUserPointer(renderer->window->glfwWindow, renderer);
@@ -44,7 +46,9 @@ Renderer *createRenderer(void) {
     createDepthResources(renderer->window);
     createRenderpass(renderer->window);
     setupPipeline(renderer->window);
+    createTexturedPipeline(renderer->window);
     createFramebuffers(renderer->window);
+    initVulkanAllocator(renderer->window);
     
     glm_perspective_default((float)renderer->window->swapchainSize.width/(float)renderer->window->swapchainSize.height, renderer->proj);
     
@@ -67,15 +71,28 @@ void destroyRenderer(Renderer *renderer) {
     }
     vkDeviceWaitIdle(renderer->window->device);
     destroyUI(renderer->window, renderer->ui);
+    destroyTexturePipeline(renderer->window);
     destroyCommandPool(renderer->window, renderer->renderPool);
+    destroyCamera(renderer->cam);
     for (int i=0; i<renderer->objectCount; i++) {
         destroyObject(renderer->objects[i]);
     }
     for (int i=0; i<renderer->modelCount; i++) {
         destroyModel(renderer->window, renderer->models[i]);
     }
+    destroyVulkanAllocators(renderer->window);
     destroyWindow(renderer->window);
-    free(renderer);
+    MEM_free(renderer);
+}
+
+void clearRenderer(Renderer *renderer) {
+    vkDeviceWaitIdle(renderer->window->device);
+    clearUI(renderer->ui);
+    if (renderer->objects) {
+        MEM_free(renderer->objects);
+    }
+    renderer->objects = NULL;
+    renderer->objectCount = 0;
 }
 
 GLFWwindow *getGLFWWindow(Renderer *renderer) {
@@ -113,7 +130,7 @@ int recordCommandBuffer(Renderer *renderer, uint32_t imageIndex) {
     
     vkCmdBeginRenderPass(renderer->commands[renderer->window->currentFrame], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
     
-    vkCmdBindPipeline(renderer->commands[renderer->window->currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->window->pipeline);
+    vkCmdBindPipeline(renderer->commands[renderer->window->currentFrame], VK_PIPELINE_BIND_POINT_GRAPHICS, renderer->window->colorPipeline);
     
     VkViewport viewport;
     viewport.x = 0.f;
@@ -129,14 +146,18 @@ int recordCommandBuffer(Renderer *renderer, uint32_t imageIndex) {
     scissor.extent = extent;
     vkCmdSetScissor(renderer->commands[renderer->window->currentFrame], 0, 1, &scissor);
     
-    for (int i=0; i<renderer->modelCount; i++) {
-        Model *model = renderer->models[i];
-        
-    }
+    float lightOn;
     
     for (int i=0; i<renderer->objectCount; i++) {
         Object  *obj = renderer->objects[i];
         Model *model = renderer->models[obj->model];
+        
+        vkCmdSetStencilReference(renderer->commands[renderer->window->currentFrame], VK_STENCIL_FACE_FRONT_BIT, 1);
+        if (obj->outline) {
+            vkCmdSetStencilWriteMask(renderer->commands[renderer->window->currentFrame], VK_STENCIL_FACE_FRONT_BIT, 1);
+        } else {
+            vkCmdSetStencilWriteMask(renderer->commands[renderer->window->currentFrame], VK_STENCIL_FACE_FRONT_BIT, 0);
+        }
         
         VkDeviceSize bufferOffset = 0;
         vkCmdBindVertexBuffers(renderer->commands[renderer->window->currentFrame], 0, 1, &model->buffer->vertexBuffer.buffer, &bufferOffset);
@@ -153,11 +174,25 @@ int recordCommandBuffer(Renderer *renderer, uint32_t imageIndex) {
         glm_mat4_mul(view, object, matTemp);
         glm_mat4_mul(renderer->proj, matTemp, transform);
         
-        vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mat4), transform);
+        vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mat4), transform);
         
-        vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->layout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(mat4), sizeof(vec4), model->color);
+        vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(mat4), sizeof(vec4), model->color);
+        
+        lightOn = 1.;
+        vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(mat4)+sizeof(vec4), sizeof(float), &lightOn);
         
         vkCmdDrawIndexed(renderer->commands[renderer->window->currentFrame], model->indexCount, 1, 0, 0, 0);
+        
+        if (obj->outline) {
+            vkCmdSetStencilReference(renderer->commands[renderer->window->currentFrame], VK_STENCIL_FACE_FRONT_BIT, 0);
+            
+            vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(mat4), sizeof(vec4), (vec4){1.f, 1.f, 1.f, 1.f});
+            glm_scale(transform, (vec3){1.01f, 1.01f, 1.01f});
+            vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(mat4), transform);
+            lightOn = 0.;
+            vkCmdPushConstants(renderer->commands[renderer->window->currentFrame], renderer->window->colorPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, sizeof(mat4)+sizeof(vec4), sizeof(float), &lightOn);
+            vkCmdDrawIndexed(renderer->commands[renderer->window->currentFrame], model->indexCount, 1, 0, 0, 0);
+        }
     }
     
     recordUICommandBuffer(renderer->ui, renderer->window, renderer->commands[renderer->window->currentFrame]);
@@ -217,7 +252,7 @@ int drawFrame(Renderer *renderer) {
         return AOA_FALSE;
     }
     
-    renderer->window->currentFrame = (renderer->window->currentFrame+1) % MAX_FRAME_IN_FLIGHT;
+    renderer->window->currentFrame = (renderer->window->currentFrame+1) % MAX_FRAMES_IN_FLIGHT;
     
     return AOA_TRUE;
 }
@@ -229,8 +264,8 @@ int addModel(Renderer *renderer, char filename[], vec4 color) {
     int verticesSize;
     acquireData(&vertices, &indices, &verticesSize, &indicesSize, filename);
     Model *model = createModel(renderer->window, verticesSize, vertices, indicesSize*sizeof(uint16_t), indices);
-    free(vertices);
-    free(indices);
+    MEM_free(vertices);
+    MEM_free(indices);
     setModelColor(model, color);
     
     renderer->models = realloc(renderer->models, (renderer->modelCount+1)*sizeof(Model*));

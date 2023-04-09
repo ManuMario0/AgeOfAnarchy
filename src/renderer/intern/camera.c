@@ -8,16 +8,17 @@
 #include <string.h>
 
 #include "camera.h"
+#include "MEM_alloc.h"
 
 Camera *createCamera(vec3 pos) {
-    Camera *cam = malloc(sizeof(Camera));
+    Camera *cam = MEM_malloc(sizeof(Camera), __func__);
     memcpy(cam->pos, pos, sizeof(vec3));
     memcpy(cam->up, (vec3){0.f, 1.f, 0.f}, sizeof(vec3));
     return cam;
 }
 
 void destroyCamera(Camera *cam) {
-    free(cam);
+    MEM_free(cam);
 }
 
 void getCameraMatrix(Camera *cam, mat4 dest) {
